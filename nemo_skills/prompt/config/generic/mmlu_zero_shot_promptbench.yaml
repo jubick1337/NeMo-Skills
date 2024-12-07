@@ -1,0 +1,8 @@
+# Prompt used by Llama-base/instruct models for MMLU benchmark
+# https://huggingface.co/datasets/meta-llama/Meta-Llama-3.1-8B-Instruct-evals/viewer/Meta-Llama-3.1-8B-Instruct-evals__mmlu__0_shot__cot__details?row=0
+
+system: ""
+
+user: |-
+  Answer the following multiple-choice question about high school european history by selecting the correct option: 'A', 'B', 'C', or 'D'. Question: {question}
+  {options}
