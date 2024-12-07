@@ -13,9 +13,11 @@
 # limitations under the License.
 
 import asyncio
+import base64
 import copy
 import json
 import logging
+import os
 import re
 import sys
 import uuid
@@ -46,6 +48,127 @@ def trim_after_stop_phrases(text: str, stop_phrases: List[str]) -> str:
     escaped_stop_phrases = [re.escape(sp) for sp in stop_phrases]
     return re.split("|".join(escaped_stop_phrases), text, maxsplit=1)[0]
 
+
+# Adapted from https://github.com/NVIDIA/NeMo/blob/main/nemo/collections/common/tokenizers/tiktoken_tokenizer.py
+PATTERN_TIKTOKEN = "[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]*[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]+|[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]+[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]*|\\p{N}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+"
+DEFAULT_TIKTOKEN_MAX_VOCAB = 2**17  # 131072
+SPECIAL_TOKENS = ["<unk>", "<s>", "</s>"]
+SPECIAL_TOKEN_TEMPLATE = "<SPECIAL_{id}>"
+class TiktokenTokenizer:
+    
+    """
+    TiktokenTokenizer https://github.com/openai/tiktoken.
+
+    Args:
+        model_path: path to tokenizer vocabulary
+        num_special_tokens: number of special tokens to generate
+        special_tokens: template for user-defined special tokens
+        pattern: Regex pattern to split the text
+    """
+
+    def __init__(
+        self,
+        vocab_file: str,
+        pattern: str = PATTERN_TIKTOKEN,
+        vocab_size: int = DEFAULT_TIKTOKEN_MAX_VOCAB,  # 131072
+        num_special_tokens: int = 1000,
+        special_tokens: Optional[List[str]] = None,
+    ):
+        try:
+            import tiktoken
+        except ImportError:
+            raise ImportError("Cannot import to initialize TiktokenTokenizer. Please install tiktoken.")
+        if not vocab_file or not os.path.exists(vocab_file):
+            raise ValueError(f"vocab_file: {vocab_file} is invalid")
+
+        if special_tokens is None:
+            special_tokens = SPECIAL_TOKENS.copy()
+
+        assert len(special_tokens) == len(set(special_tokens)), f"Special tokens should be unique: {special_tokens}"
+        assert len(special_tokens) <= num_special_tokens < vocab_size
+        assert set(SPECIAL_TOKENS) <= set(special_tokens), f"Custom special tokens should include {SPECIAL_TOKENS}"
+
+        self._unk_id = special_tokens.index("<unk>")
+        self._bos_id = special_tokens.index("<s>")
+        self._eos_id = special_tokens.index("</s>")
+        self.pad_token_id = None
+        self.eos_token_id = self._eos_id
+
+        self._vocab_size = vocab_size
+        logging.info(f"Vocab size: {self._vocab_size}")
+        self.num_special_tokens = num_special_tokens
+        special_filler = [SPECIAL_TOKEN_TEMPLATE.format(id=i) for i in range(len(special_tokens), num_special_tokens)]
+        if special_filler:
+            logging.info(f"Adding special tokens {special_filler[0]}, ..., {special_filler[-1]}")
+        self.special_tokens = special_tokens + special_filler
+        assert len(set(self.special_tokens)) == len(self.special_tokens) == num_special_tokens, self.special_tokens
+        self.inner_vocab_size = vocab_size - num_special_tokens
+
+        # reload vocab
+        self.token2id = self.reload_mergeable_ranks(vocab_file, max_vocab=self.inner_vocab_size)
+        self.id2token = {v: k for k, v in self.token2id.items()}
+        assert set(range(self.inner_vocab_size)) == set(self.id2token.keys())
+
+        self.shifted_id2token = {i: tok for i, tok in enumerate(self.special_tokens)}
+        for key, value in self.id2token.items():
+            self.shifted_id2token[key + self.num_special_tokens] = value
+
+        self.tokenizer = tiktoken.Encoding(
+            name=Path(vocab_file).parent.name,
+            pat_str=pattern,
+            mergeable_ranks=self.token2id,
+            special_tokens={},  # special tokens are handled manually
+        )
+    def reload_mergeable_ranks(
+        self,
+        path: str,
+        max_vocab: Optional[int] = None,
+    ) -> Dict[bytes, int]:
+        """
+        Reload the tokenizer JSON file and convert it to Tiktoken format.
+        """
+        assert path.endswith(".json")
+
+        # reload vocab
+        with open(path, "r") as f:
+            vocab = json.load(f)
+        assert isinstance(vocab, list)
+        print(f"Vocab size: {len(vocab)}")
+        if max_vocab is not None:
+            vocab = vocab[:max_vocab]
+            print(f"Cutting vocab to first {len(vocab)} tokens.")
+
+        # build ranks
+        ranks: Dict[bytes, int] = {}
+        for i, x in enumerate(vocab):
+            assert x.keys() == {"rank", "token_bytes", "token_str"}
+            assert x["rank"] == i
+            merge = base64.b64decode(x["token_bytes"])
+            assert i >= 256 or merge == bytes([i])
+            ranks[merge] = x["rank"]
+
+        # sanity check
+        assert len(ranks) == len(vocab)
+        assert set(ranks.values()) == set(range(len(ranks)))
+
+        return ranks
+    
+    def encode(self, text, add_special_tokens: bool = True, **kwargs):
+        return [self.tokenizer.encode_single_token(token) for token in self.tokenizer.encode(text)]
+    
+    def batch_encode_plus(self, batch_text_or_text_pairs, add_special_tokens: bool = True, **kwargs):
+        return {'input_ids': self.tokenizer.encode_batch(batch_text_or_text_pairs)}
+
+    def batch_decode(self, sequences, skip_special_tokens: bool = False, **kwargs):
+        if isinstance(sequences, np.ndarray) or torch.is_tensor(sequences):
+            sequences = sequences.tolist()
+        return self.tokenizer.decode_batch(sequences)
+
+    def decode(self, token_ids, skip_special_tokens: bool = False, **kwargs):
+        if torch.is_tensor(token_ids):
+            token_ids = token_ids.tolist()
+        return self.tokenizer.decode(token_ids)
+    
 
 class CustomSentencePieceTokenizer(T5Tokenizer):
     """
@@ -98,10 +221,10 @@ def get_output(output_ids, input_length, max_output_len, tokenizer, eos_token) -
     return tokenizer.decode(outputs), len(outputs)
 
 
-def load_tokenizer(tokenizer_dir: str, model_name: str):
-    if model_name == 'gpt-next':
+def load_tokenizer(tokenizer_dir: str, tokenizer_type: str):
+    if tokenizer_type == 'sentencepiece':
         tokenizer = CustomSentencePieceTokenizer(str(Path(tokenizer_dir) / 'tokenizer.model'))
-    else:
+    elif tokenizer_type == 'transformers':
         tokenizer = AutoTokenizer.from_pretrained(
             tokenizer_dir,
             legacy=False,
@@ -109,6 +232,12 @@ def load_tokenizer(tokenizer_dir: str, model_name: str):
             truncation_side='left',
             trust_remote_code=True,
         )
+    elif tokenizer_type == 'tiktoken':
+        tokenizer = TiktokenTokenizer(
+            vocab_file=str(Path(tokenizer_dir) / 'vocab.json'),
+        )
+    else:
+        raise ValueError(f"Unknown tokenizer type: {tokenizer_type}")
 
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -399,8 +528,16 @@ class TensorRTLLM:
     ):
         with open(Path(model_path) / "config.json", 'r') as f:
             config = json.load(f)
+        if config.get('tokenizer_type', None):
+            tokenizer_type = config['tokenizer_type']
+        else:
+            model_name = read_model_name(config)
+            if model_name == 'gpt-next':
+                tokenizer_type = 'sentencepiece'
+            else:
+                tokenizer_type = 'transformers'
         self.tokenizer, self.pad_id, self.end_id = load_tokenizer(
-            tokenizer_dir=model_path, model_name=read_model_name(config)
+            tokenizer_dir=model_path, tokenizer_type=tokenizer_type
         )
 
         runner_kwargs = dict(
