@@ -163,7 +163,7 @@ class TiktokenTokenizer:
         adjusted_tokens = [
             t - self.num_special_tokens
             for t in tokens
-            if t not in {self.bos, self.eos} and t >= self.num_special_tokens
+            if t not in {self._bos, self._eos} and t >= self.num_special_tokens
         ]
 
         # Decode only if there are tokens left after filtering
