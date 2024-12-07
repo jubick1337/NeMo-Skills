@@ -4,5 +4,5 @@
 system: ""
 
 user: |-
-  Answer the following multiple-choice question about {task} by selecting the correct option: 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I' or 'J'. Question: {question}
+  Answer the following multiple-choice question about {subset_for_metrics} by selecting the correct option: 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I' or 'J'. Question: {question}
   {options}
