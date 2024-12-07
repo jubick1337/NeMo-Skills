@@ -182,12 +182,10 @@ class TiktokenTokenizer:
     def decode(self, token_ids, skip_special_tokens: bool = False, **kwargs):
         if torch.is_tensor(token_ids):
             token_ids = token_ids.tolist()
-        try:
-            return self.ids_to_text(token_ids)
-        except TypeError as e:
-            logging.error(f"Error decoding token_ids: {token_ids}")
-            logging.error(f"Type of token_ids: {type(token_ids)}")
-            raise e
+        if isinstance(token_ids, int):
+            return self.ids_to_text([token_ids])
+        return self.ids_to_text(token_ids)
+        
 
     def batch_decode(self, sequences, skip_special_tokens: bool = False, **kwargs):
         if isinstance(sequences, np.ndarray) or torch.is_tensor(sequences):
