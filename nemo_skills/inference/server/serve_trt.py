@@ -119,6 +119,7 @@ class TiktokenTokenizer:
             mergeable_ranks=self.token2id,
             special_tokens={},  # special tokens are handled manually
         )
+
     def reload_mergeable_ranks(
         self,
         path: str,
@@ -181,7 +182,12 @@ class TiktokenTokenizer:
     def decode(self, token_ids, skip_special_tokens: bool = False, **kwargs):
         if torch.is_tensor(token_ids):
             token_ids = token_ids.tolist()
-        return self.ids_to_text(token_ids)
+        try:
+            return self.ids_to_text(token_ids)
+        except TypeError as e:
+            logging.error(f"Error decoding token_ids: {token_ids}")
+            logging.error(f"Type of token_ids: {type(token_ids)}")
+            raise e
 
     def batch_decode(self, sequences, skip_special_tokens: bool = False, **kwargs):
         if isinstance(sequences, np.ndarray) or torch.is_tensor(sequences):
