@@ -6,6 +6,3 @@ system: ""
 user: |-
   Answer the following multiple-choice question about {task} by selecting the correct option: 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I' or 'J'. Question: {question}
   {options}
-  Always conclude with:
-  The best answer is [the_answer_letter].
-  where the [the_answer_letter] is one of A, B, C, D, E, F, G, H, I or J.
