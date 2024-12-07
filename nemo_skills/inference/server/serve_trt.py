@@ -153,21 +153,40 @@ class TiktokenTokenizer:
 
         return ranks
     
+    def text_to_ids(self, text: str):
+            tokens = self.tokenizer.encode(text)
+            tokens = [t + self.num_special_tokens for t in tokens]
+            return tokens
+    
+    def ids_to_text(self, tokens: List[int]):
+        # Filter out special tokens and adjust the remaining tokens
+        adjusted_tokens = [
+            t - self.num_special_tokens
+            for t in tokens
+            if t not in {self.bos, self.eos} and t >= self.num_special_tokens
+        ]
+
+        # Decode only if there are tokens left after filtering
+        if adjusted_tokens:
+            return self.tokenizer.decode(adjusted_tokens)
+        else:
+            return ""  # Return an empty string if all tokens were filtered out
+    
     def encode(self, text, add_special_tokens: bool = True, **kwargs):
-        return [self.tokenizer.encode_single_token(token) for token in self.tokenizer.encode(text)]
+        return torch.Tensor(self.text_to_ids(text))
     
     def batch_encode_plus(self, batch_text_or_text_pairs, add_special_tokens: bool = True, **kwargs):
-        return {'input_ids': self.tokenizer.encode_batch(batch_text_or_text_pairs)}
-
-    def batch_decode(self, sequences, skip_special_tokens: bool = False, **kwargs):
-        if isinstance(sequences, np.ndarray) or torch.is_tensor(sequences):
-            sequences = sequences.tolist()
-        return self.tokenizer.decode_batch(sequences)
+        return {'input_ids': [self.text_to_ids(text) for text in batch_text_or_text_pairs]}
 
     def decode(self, token_ids, skip_special_tokens: bool = False, **kwargs):
         if torch.is_tensor(token_ids):
             token_ids = token_ids.tolist()
-        return self.tokenizer.decode(token_ids)
+        return self.ids_to_text(token_ids)
+
+    def batch_decode(self, sequences, skip_special_tokens: bool = False, **kwargs):
+        if isinstance(sequences, np.ndarray) or torch.is_tensor(sequences):
+            sequences = sequences.tolist()
+        return [self.ids_to_text(seq) for seq in sequences]
     
 
 class CustomSentencePieceTokenizer(T5Tokenizer):
