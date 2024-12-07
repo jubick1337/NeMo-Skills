@@ -5,4 +5,7 @@ system: ""
 
 user: |-
   Answer the following multiple-choice question about high school european history by selecting the correct option: 'A', 'B', 'C', or 'D'. Question: {question}
-  {options}
+    A. {A}
+    B. {B}
+    C. {C}
+    D. {D}
