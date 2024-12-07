@@ -24,4 +24,4 @@ DEFAULT_EVAL_ARGS = (
 )
 
 
-DEFAULT_GENERATION_ARGS = "++split=test_llama"
+DEFAULT_GENERATION_ARGS = " "
