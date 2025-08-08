@@ -143,11 +143,14 @@ def get_reward_server_command(
     else:
         raise ValueError(f"Server type '{server_type}' not supported for reward model.")
 
+    # Allow overriding model max context for vLLM when requested via --max-model-len
+    env_exports = "export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 && " if server_type == 'vllm' else ""
+
     server_cmd = (
         f"nvidia-smi && "
         f"cd /nemo_run/code && "
         f"export PYTHONPATH=$PYTHONPATH:/nemo_run/code && "
-        f"{server_start_cmd} "
+        f"{env_exports}{server_start_cmd} "
     )
     return server_cmd, num_tasks
 
